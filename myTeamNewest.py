@@ -24,7 +24,7 @@ from captureAgents import CaptureAgent
 #################
 
 def create_team(first_index, second_index, is_red,
-                first='AStarAgent', second='AStarAgent', num_training=0):
+                first='DefensiveAStarAgent', second='DefensiveAStarAgent', num_training=0):
     """
     This function should return a list of two agents that will form the
     team, initialized using firstIndex and secondIndex as their agent
@@ -107,6 +107,9 @@ class AgentSuperclass(CaptureAgent):
         else:
             return None
 
+    def nullHeuristic(self, state, problem=None):
+        return 0
+
     def heuristic1(self, state, gameState):
         # the heuristic makes the agent dodge the ghosts so he does not run into them
         # the problem we still have is that food is too interesting so he can dodge the ghosts, but he will
@@ -120,7 +123,7 @@ class AgentSuperclass(CaptureAgent):
                 ghostDists = [self.get_maze_distance(state, ghostPosition) for ghostPosition in ghostPositions]
                 ghostDist = min(ghostDists)
                 if ghostDist < 2:
-                    heuristic = pow((5 - ghostDist), 4)
+                    heuristic = pow((5 - ghostDist), 5)
         return heuristic
 
     def aStarSearch(self, problem, gameState, heuristic):
@@ -137,14 +140,14 @@ class AgentSuperclass(CaptureAgent):
         visitedNodes = []
         path = []
         if problem.isGoalState(start_state):
-            return path
+            return "Stop"
 
         h = heuristic(start_state, gameState)
         frontier.push((start_state, [], 0), h)
 
         while True:
             if frontier.isEmpty():
-                return
+                return "Stop"
 
             node = frontier.pop()
 
@@ -155,7 +158,6 @@ class AgentSuperclass(CaptureAgent):
             visitedNodes.append(state)
 
             if problem.isGoalState(state):
-                print(path[0])
                 return path
 
             successors = problem.getSuccessors(state)
@@ -233,7 +235,7 @@ class AStarAgent(AgentSuperclass):
 
     def choose_action(self, game_state):
         if game_state.data.timeleft < self.homeDistance(game_state) + 30 or game_state.get_agent_state(
-                self.index).num_carrying > 5:
+                self.index).num_carrying > 3:
             problem = ReturnHome(game_state, self, self.index)
             if len(self.aStarSearch(problem, game_state, self.heuristic1)) == 0:
                 return 'Stop'
@@ -263,6 +265,7 @@ class DefensiveAStarAgent(AgentSuperclass):
     def __init__(self, index, time_for_computing=.1):
         super().__init__(index, time_for_computing)
         self.start = None
+        self.lastFoodEaten = None
 
     def register_initial_state(self, game_state):
         """
@@ -294,26 +297,38 @@ class DefensiveAStarAgent(AgentSuperclass):
 
     def choose_action(self, game_state):
         opposition = [game_state.get_agent_state(agentIndex) for agentIndex in self.get_opponents(game_state)]
-        visibleOpponents = [p for p in opposition if p.is_pacman and p.get_position is not None]
-        #if there are no visible opponents on the homeside the agent should go to the closest entry point
-        if len(visibleOpponents) == 0:
-            problem = ReturnHome(game_state, self, self.index)
-            nextMoves = self.aStarSearch(problem, game_state, self.heuristic1)
-            if len(nextMoves) == 0:
-                return "Stop"
-            else:
-                return nextMoves[0]
-        #if there are visible invaders, the agent should try and catch them
+        pacmen = [p for p in opposition if p.is_pacman]
+        if pacmen:
+            pacmenPosition = [p.get_position() for p in pacmen if p.get_position is not None]
         else:
-            problem = CatchAttackers(game_state, self, self.index)
-            nextMoves = self.aStarSearch(problem, game_state, self.heuristic1)[0]
-            if len(nextMoves) == 0:
+            pacmenPosition = None
+
+        if len(pacmen) == 0:
+            if game_state.get_agent_state(self.index).num_carrying < 3:
+                problem = EatFood(game_state, self, self.index)
+                return self.aStarSearch(problem, game_state, self.heuristic1)[0]
+
+            problem = ReturnHome(game_state, self, self.index)
+            nextMove = self.aStarSearch(problem, game_state, self.heuristic1)[0]
+            if nextMove == "S":
                 return "Stop"
             else:
-                return nextMoves[0]
-
-
-
+                return nextMove
+        else:
+            if pacmenPosition[0] is not None:
+                problem = CatchAttackers(game_state, self, self.index)
+                return self.aStarSearch(problem, game_state, self.heuristic1)[0]
+            else:
+                problem = LastFoodProblem(game_state, self, self.index)
+                if problem.lastFoodPosition is None:
+                    problem = ReturnHome(game_state, self, self.index)
+                    nextMove = self.aStarSearch(problem, game_state, self.heuristic1)[0]
+                    if nextMove == "S":
+                        return "Stop"
+                    else:
+                        return nextMove
+                else:
+                    return self.aStarSearch(problem, game_state, self.nullHeuristic)[0]
 
 
 class PositionSearchProblem:
@@ -323,9 +338,10 @@ class PositionSearchProblem:
     """
 
     def __init__(self, gameState, agent, agentIndex=0, costFn=lambda x: 1):
-        self.walls = gameState.getWalls()
+        self.walls = gameState.get_walls()
         self.costFn = costFn
-        self.startState = gameState.getAgentState(agentIndex).getPosition()
+        self.startState = gameState.get_agent_state(agentIndex).get_position()
+        self.food = agent.get_food(gameState)
 
     def getStartState(self):
         return self.startState
@@ -368,11 +384,7 @@ class EatFood(PositionSearchProblem):
   """
 
     def __init__(self, gameState, agent, agentIndex=0):
-        self.food = agent.get_food(gameState)
-        self.capsule = agent.get_capsules(gameState)
-        self.startState = gameState.get_agent_state(agentIndex).get_position()
-        self.walls = gameState.get_walls()
-        self.costFn = lambda x: 1
+        super().__init__(gameState, agent, agentIndex)
         self.carry = gameState.get_agent_state(agentIndex).num_carrying
 
     def isGoalState(self, state):
@@ -386,11 +398,9 @@ class ReturnHome(PositionSearchProblem):
   Used to go back home
   """
 
-    def __init__(self, gameState, agent, agentIndex=0):
-        self.costFn = lambda x: 1
+    def __init__(self, gameState, agent, agentIndex):
+        super().__init__(gameState, agent, agentIndex)
         self.homeBoundary = agent.entryPoints(gameState)
-        self.startState = gameState.get_agent_state(agentIndex).get_position()
-        self.walls = gameState.get_walls()
 
     def getStartState(self):
         return self.startState
@@ -403,17 +413,34 @@ class CatchAttackers(PositionSearchProblem):
     """This problem is used to declare the problem, where the homeside has to be defended"""
 
     def __init__(self, gameState, agent, agentIndex=0):
-        self.food = agent.get_food(gameState)
-        self.startState = gameState.get_agent_state(agentIndex).get_position()
-        self.walls = gameState.get_walls()
-        self.costFn = lambda x: 1
+        super().__init__(gameState, agent, agentIndex)
         self.opposition = [gameState.get_agent_state(agentIndex) for agentIndex in agent.get_opponents(gameState)]
         self.pacmen = [p for p in self.opposition if p.is_pacman and p.get_position is not None]
-        if self.pacmen[0].get_position() is not None:
+        if self.pacmen:
             self.pacmenPosition = [p.get_position() for p in self.pacmen]
-            print(self.pacmenPosition)
         else:
             self.pacmenPosition = None
 
     def isGoalState(self, state):
         return state in self.pacmenPosition
+
+
+class LastFoodProblem(PositionSearchProblem):
+
+    def __init__(self, gameState, agent, agentIndex):
+        super().__init__(gameState, agent, agentIndex)
+        self.lastFoodPosition = self.getLastFoodPosition(gameState, agent)
+
+    def isGoalState(self, state):
+        return state == self.lastFoodPosition
+
+    def getLastFoodPosition(self, gameState, agent):
+        prevObservation = agent.get_previous_observation()
+        prevFood = agent.get_food_you_are_defending(prevObservation)
+        currentFood = agent.get_food_you_are_defending(gameState)
+        for i in range(gameState.data.layout.width):
+            for j in range(gameState.data.layout.height):
+                if prevFood[i][j] != currentFood[i][j]:
+                    agent.lastFoodEaten = (i, j)
+                    return i, j
+        return agent.lastFoodEaten
