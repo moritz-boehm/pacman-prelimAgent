@@ -173,6 +173,7 @@ class AgentSuperclass(CaptureAgent):
         # the problem we still have is that food is too interesting so he can dodge the ghosts, but he will
         # go for food and die if the ghost follows him
         heuristic = 0
+        ghosts = []
         if self.closestGhostDistance(gameState) is not None:
             enemies = [gameState.get_agent_state(i) for i in self.get_opponents(gameState)]
             ghosts = [a for a in enemies if not a.is_pacman and a.scared_timer < 2 and a.get_position() is not None]
@@ -182,6 +183,13 @@ class AgentSuperclass(CaptureAgent):
                 ghostDist = min(ghostDists)
                 if ghostDist < 3:
                     heuristic = pow((5 - ghostDist), 5)
+        if self.red:
+            agentIndices = gameState.get_red_team_indices()
+        else:
+            agentIndices = gameState.get_blue_team_indices()
+        distToTeammate = self.get_maze_distance(state, gameState.get_agent_state(agentIndices[0]).get_position())
+        if len(agentIndices) > 1 and self.index == agentIndices[1] and distToTeammate < 5 and ghosts is not None and len(ghosts) == 0:
+            heuristic += pow(5 - distToTeammate, 5)
         return heuristic
 
     def aStarSearch(self, problem, gameState, heuristic):
@@ -367,14 +375,13 @@ class DefensiveAStarAgent(AgentSuperclass):
                 loosing = True
         else:
             agentIndices = game_state.get_blue_team_indices()
-            if game_state.get.score() > 1:
+            if game_state.get_score() > -1:
                 loosing = True
         if pacmen:
             pacmenPosition = [p.get_position() for p in pacmen if p.get_position is not None]
         else:
             pacmenPosition = None
-        if (len(pacmen) == 0):
-            # game_state.data.timeleft < self.startState.data.timeleft * 0.75
+        if (len(pacmen) == 0) or (len(pacmen) == 1 and self.index != agentIndices[0] and loosing) or (game_state.data.timeleft < self.startState.data.timeleft * 0.25 and loosing):
             if loosing and game_state.get_agent_state(self.index).num_carrying < 2:
                 problem = EatFood(game_state, self, self.index)
                 return self.aStarSearch(problem, game_state, self.heuristic1)[0]
@@ -382,7 +389,7 @@ class DefensiveAStarAgent(AgentSuperclass):
                 closestGhost = 3
                 if self.closestGhostDistance(game_state) is not None:
                     closestGhost = self.closestGhostDistance(game_state)
-                if self.closestFoodDistance(game_state) < 8 and closestGhost < 4:
+                if self.closestFoodDistance(game_state) < 10 and closestGhost < 6 and game_state.get_agent_state(self.index).num_carrying < 2:
                     problem = EatFood(game_state, self, self.index)
                     return self.aStarSearch(problem, game_state, self.heuristic1)[0]
                 if opposition[0].scared_timer > 5:
@@ -416,7 +423,7 @@ class DefensiveAStarAgent(AgentSuperclass):
             else:
                 problem = LastFoodProblem(game_state, self, self.index)
                 if problem.lastFoodPosition is None:
-                    problem = ReturnHome(game_state, self, self.index)
+                    problem = PatrolEntry(game_state, self, self.index)
                     nextMove = self.aStarSearch(problem, game_state, self.heuristic1)[0]
                     if nextMove == "S":
                         return "Stop"
