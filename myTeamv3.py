@@ -381,7 +381,7 @@ class DefensiveAStarAgent(AgentSuperclass):
             pacmenPosition = [p.get_position() for p in pacmen if p.get_position is not None]
         else:
             pacmenPosition = None
-        if (len(pacmen) == 0) or (len(pacmen) == 1 and self.index != agentIndices[0] and loosing) or (game_state.data.timeleft < self.startState.data.timeleft * 0.25 and loosing):
+        if (len(pacmen) == 0) or (len(pacmen) == 1 and self.index != agentIndices[0] and loosing) or (game_state.data.timeleft < self.startState.data.timeleft * 0.25 and loosing and game_state.get_agent_state(self.index).num_carrying < abs(game_state.get_score())):
             if loosing and game_state.get_agent_state(self.index).num_carrying < 2:
                 problem = EatFood(game_state, self, self.index)
                 return self.aStarSearch(problem, game_state, self.heuristic1)[0]
